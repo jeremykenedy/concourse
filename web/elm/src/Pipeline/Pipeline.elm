@@ -12,10 +12,12 @@ module Pipeline.Pipeline exposing
     , view
     )
 
+import Html.Lazy
 import Colors
 import Concourse
 import Concourse.Cli as Cli
-import Dict
+import Dashboard.Dashboard as Dashboard
+import Dict exposing (Dict)
 import EffectTransformer exposing (ET)
 import Html exposing (Html)
 import Html.Attributes
@@ -47,6 +49,8 @@ import Message.TopLevelMessage exposing (TopLevelMessage(..))
 import Pipeline.Styles as Styles
 import RemoteData exposing (WebData)
 import Routes
+import ScreenSize
+import SideBar.SideBar as SideBar
 import StrictEvents exposing (onLeftClickOrShiftLeftClick)
 import Svg
 import Svg.Attributes as SvgAttributes
@@ -73,6 +77,9 @@ type alias Model =
         , hideLegendCounter : Float
         , isToggleLoading : Bool
         , hovered : Maybe DomID
+        , groupToggleStates : Dict String Bool
+        , groups : List { teamName : String, pipelines : List { name : String } }
+        , sideBarOpen : Bool
         }
 
 
@@ -102,6 +109,13 @@ init flags =
             , selectedGroups = flags.selectedGroups
             , isUserMenuExpanded = False
             , hovered = Nothing
+            , sideBarOpen = False
+            , groupToggleStates = Dict.fromList [ ( "team", True ) ]
+            , groups =
+                [ { teamName = "team"
+                  , pipelines = [ { name = "pipeline" } ]
+                  }
+                ]
             }
     in
     ( model
@@ -302,7 +316,12 @@ handleDelivery delivery ( model, effects ) =
 
 
 update : Message -> ET Model
-update msg ( model, effects ) =
+update msg =
+    SideBar.update msg >> updateBody msg
+
+
+updateBody : Message -> ET Model
+updateBody msg ( model, effects ) =
     case msg of
         ToggleGroup group ->
             ( model
@@ -387,7 +406,15 @@ view userState model =
                             isPaused model.pipeline
                        )
                 )
-                [ TopBar.concourseLogo
+                [ Html.div [ style "display" "flex" ]
+                    [ SideBar.hamburgerMenu
+                        { screenSize = ScreenSize.Desktop
+                        , groups = model.groups
+                        , sideBarOpen = model.sideBarOpen
+                        , hovered = model.hovered
+                        }
+                    , TopBar.concourseLogo
+                    ]
                 , TopBar.breadcrumbs route
                 , viewPinMenu
                     { pinnedResources = getPinnedResources model
@@ -414,8 +441,22 @@ view userState model =
                 , Login.view userState model <| isPaused model.pipeline
                 ]
             , Html.div
-                (id "page-below-top-bar" :: Views.Styles.pageBelowTopBar route)
-                [ viewSubPage model ]
+                ([ id "page-below-top-bar", style "display" "flex" ]
+                    ++ Views.Styles.pageBelowTopBar route
+                )
+              <|
+                if model.sideBarOpen then
+                    [ SideBar.view
+                        { groupToggleStates = model.groupToggleStates
+                        , groups = model.groups
+                        , hovered = model.hovered
+                        , sideBarOpen = model.sideBarOpen
+                        }
+                    , Html.Lazy.lazy viewSubPage model
+                    ]
+
+                else
+                    [ Html.Lazy.lazy viewSubPage model ]
             ]
         ]
 
@@ -510,7 +551,7 @@ isPaused p =
 
 viewSubPage : Model -> Html Message
 viewSubPage model =
-    Html.div [ class "pipeline-view" ]
+    Html.div [ class "pipeline-view", style "flex-grow" "1" ]
         [ viewGroupsBar model
         , Html.div [ class "pipeline-content" ]
             [ Svg.svg
